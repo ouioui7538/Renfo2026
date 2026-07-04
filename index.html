@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Circuit Renfo" />
+  <title>Circuit Renfo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a14; color: #f0f0f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const TEMPLATES = {
+      A: {
+        name: "Push & Gainage",
+        color: "#FF5C00",
+        exercises: [
+          { name: "Pompes", tip: "Genoux si besoin · Corps droit · Coudes à 45°", emoji: "💪" },
+          { name: "Dips", tip: "Mains sur une chaise · Descends lentement", emoji: "🪑" },
+          { name: "Extensions Triceps Élastique", tip: "Bras au-dessus de la tête · Contrôle la descente", emoji: "🎽" },
+          { name: "Planche", tip: "Gainage maximal · Respire · Hanches alignées", emoji: "🧘" },
+          { name: "Crunchs Relevés de Jambes", tip: "Bas du dos collé au sol · Jambes tendues", emoji: "🦵" },
+        ],
+      },
+      B: {
+        name: "Pull & Stabilité",
+        color: "#00B4D8",
+        exercises: [
+          { name: "Rowing Élastique (dos)", tip: "Coudes le long du corps · Omoplates serrées", emoji: "🏹" },
+          { name: "Tirage Élastique au-dessus", tip: "Bras tendus · Tire vers la nuque · Contrôle", emoji: "⬆️" },
+          { name: "Fentes Arrière Alternées", tip: "Genou avant à 90° · Dos droit · Poussée franche", emoji: "🚶" },
+          { name: "Pont Fessier Unilatéral", tip: "Alterner les jambes · Montée lente · Serrer en haut", emoji: "🍑" },
+          { name: "Gainage Latéral", tip: "Change de côté à mi-temps · Hanche levée", emoji: "↔️" },
+        ],
+      },
+      C: {
+        name: "Full Push/Pull + Abdos",
+        color: "#7B2FBE",
+        exercises: [
+          { name: "Pompes Inclinées", tip: "Mains surélevées sur une chaise · Dos droit", emoji: "📐" },
+          { name: "Rowing Élastique Prise Large", tip: "Prise large · Étire bien en avant · Tire fort", emoji: "🎯" },
+          { name: "Élévations Latérales Élastique", tip: "Bras semi-fléchis · Monte à hauteur d'épaule", emoji: "🦅" },
+          { name: "Mountain Climbers", tip: "Rythme soutenu · Gainage strict · Hanches basses", emoji: "🏔️" },
+          { name: "Russian Twists", tip: "Pieds décollés · Rotation maximale · Contrôle", emoji: "🌀" },
+        ],
+      },
+      D: {
+        name: "Jambes Course/Vélo + Gainage",
+        color: "#2DC653",
+        exercises: [
+          { name: "Squats (tempo lent)", tip: "3s en descente · Genoux dans l'axe · Descends bas", emoji: "🏋️" },
+          { name: "Fente Surélevée / Squat Bulgare", tip: "Pied arrière surélevé · Alterner · Reste stable", emoji: "🦶" },
+          { name: "Mollets sur Marche", tip: "Monte haut · Descends sous le bord · Lentement", emoji: "👟" },
+          { name: "Planche Dynamique", tip: "Alterne coudes / mains · Gainage constant", emoji: "⚡" },
+          { name: "Crunchs Vélo (Bicycle)", tip: "Coude vers genou opposé · Rythme lent et contrôlé", emoji: "🚴" },
+        ],
+      },
+    };
+
+    const EXERCISE_TIME = 45;
+    const TRANSITION_TIME = 10;
+    const REST_TIME = 75;
+    const WARMUP_TIME = 300;
+    const COOLDOWN_TIME = 300;
+    const ROUNDS = 3;
+
+    function buildSequence(template) {
+      const seq = [];
+      seq.push({ type: "warmup", label: "Échauffement", tip: "Rotations, jumping jacks légers, mobilisation", duration: WARMUP_TIME, emoji: "🔥" });
+      for (let r = 0; r < ROUNDS; r++) {
+        seq.push({ type: "round-announce", label: `Tour ${r + 1} / ${ROUNDS}`, duration: 3, emoji: "🔔" });
+        template.exercises.forEach((ex, i) => {
+          seq.push({ type: "exercise", label: ex.name, tip: ex.tip, duration: EXERCISE_TIME, emoji: ex.emoji, round: r + 1 });
+          if (i < template.exercises.length - 1) {
+            seq.push({ type: "transition", label: template.exercises[i + 1].name, tip: "Prépare-toi !", duration: TRANSITION_TIME, emoji: "⏭️" });
+          }
+        });
+        if (r < ROUNDS - 1) {
+          seq.push({ type: "rest", label: "Repos", tip: "Récupère · Respire · Prochain tour dans…", duration: REST_TIME, emoji: "😮‍💨" });
+        }
+      }
+      seq.push({ type: "cooldown", label: "Étirements", tip: "Étire chaque groupe musculaire travaillé", duration: COOLDOWN_TIME, emoji: "🧊" });
+      return seq;
+    }
+
+    function totalDuration(seq) {
+      return seq.reduce((a, s) => a + s.duration, 0);
+    }
+
+    function CircleTimer({ progress, color, size = 220, strokeWidth = 12 }) {
+      const r = (size - strokeWidth) / 2;
+      const circ = 2 * Math.PI * r;
+      const dash = circ * (1 - progress);
+      return (
+        <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1a1a2e" strokeWidth={strokeWidth} />
+          <circle
+            cx={size / 2} cy={size / 2} r={r} fill="none"
+            stroke={color} strokeWidth={strokeWidth}
+            strokeDasharray={circ} strokeDashoffset={dash}
+            strokeLinecap="round"
+            style={{ transition: "stroke-dashoffset 0.4s linear, stroke 0.4s" }}
+          />
+        </svg>
+      );
+    }
+
+    function App() {
+      const [templateKey, setTemplateKey] = useState("A");
+      const [isRunning, setIsRunning] = useState(false);
+      const [stepIndex, setStepIndex] = useState(0);
+      const [elapsed, setElapsed] = useState(0);
+      const [musicOn, setMusicOn] = useState(true);
+      const [started, setStarted] = useState(false);
+
+      const timerRef = useRef(null);
+      const synthsRef = useRef(null);
+      const seqRef = useRef(null);
+      const toneStarted = useRef(false);
+
+      const template = TEMPLATES[templateKey];
+      const sequence = buildSequence(template);
+      const step = sequence[stepIndex] || sequence[sequence.length - 1];
+      const totalElapsed = sequence.slice(0, stepIndex).reduce((a, s) => a + s.duration, 0) + elapsed;
+      const total = totalDuration(sequence);
+      const globalProgress = totalElapsed / total;
+      const stepProgress = elapsed / step.duration;
+      const remaining = step.duration - elapsed;
+
+      const getPhaseColor = (type) => {
+        if (type === "exercise") return template.color;
+        if (type === "transition") return "#F4B942";
+        if (type === "rest") return "#4CC9F0";
+        if (type === "warmup") return "#FF9F1C";
+        if (type === "cooldown") return "#4CC9F0";
+        if (type === "round-announce") return "#E0E0E0";
+        return "#888";
+      };
+
+      const phaseColor = getPhaseColor(step.type);
+
+      const stopMusic = useCallback(() => {
+        if (seqRef.current) { try { seqRef.current.stop(); seqRef.current.dispose(); } catch (e) {} seqRef.current = null; }
+        if (synthsRef.current) {
+          try { Object.values(synthsRef.current).forEach(s => { s.stop && s.stop(); s.dispose && s.dispose(); }); } catch (e) {}
+          synthsRef.current = null;
+        }
+        try { Tone.Transport.stop(); } catch(e) {}
+      }, []);
+
+      const startMusic = useCallback(async () => {
+        stopMusic();
+        if (!musicOn) return;
+        await Tone.start();
+        Tone.Transport.bpm.value = 128;
+
+        const kick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 8, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.1 } }).toDestination();
+        const snare = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.05 } }).toDestination();
+        const hihat = new Tone.MetalSynth({ frequency: 400, envelope: { attack: 0.001, decay: 0.05, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination();
+        const arp = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.3, release: 0.2 }, volume: -18 }).toDestination();
+
+        snare.volume.value = -10;
+        hihat.volume.value = -20;
+        kick.volume.value = -6;
+
+        const notes = ["C4", "E4", "G4", "B4", "C5", "G4", "E4", "B3"];
+        let noteIdx = 0;
+
+        const loop = new Tone.Sequence((time, beat) => {
+          if (beat === 0 || beat === 2) kick.triggerAttackRelease("C1", "8n", time);
+          if (beat === 1 || beat === 3) snare.triggerAttackRelease("8n", time);
+          hihat.triggerAttackRelease("32n", time);
+          if (beat === 0) { arp.triggerAttackRelease(notes[noteIdx % notes.length], "8n", time); noteIdx++; }
+        }, [0, 1, 2, 3], "4n");
+
+        synthsRef.current = { kick, snare, hihat, arp };
+        seqRef.current = loop;
+        loop.start(0);
+        Tone.Transport.start();
+        toneStarted.current = true;
+      }, [musicOn, stopMusic]);
+
+      useEffect(() => {
+        if (isRunning) {
+          timerRef.current = setInterval(() => {
+            setElapsed(prev => {
+              if (prev + 1 >= step.duration) {
+                setStepIndex(si => {
+                  const next = si + 1;
+                  if (next >= sequence.length) {
+                    setIsRunning(false);
+                    stopMusic();
+                    return si;
+                  }
+                  return next;
+                });
+                return 0;
+              }
+              return prev + 1;
+            });
+          }, 1000);
+        }
+        return () => clearInterval(timerRef.current);
+      }, [isRunning, step.duration, sequence.length, stopMusic]);
+
+      const handleStart = async () => {
+        await Tone.start();
+        if (musicOn) await startMusic();
+        setIsRunning(true);
+        setStarted(true);
+      };
+
+      const handlePause = () => {
+        setIsRunning(false);
+        try { Tone.Transport.pause(); } catch(e) {}
+      };
+
+      const handleResume = () => {
+        setIsRunning(true);
+        try { Tone.Transport.start(); } catch(e) {}
+      };
+
+      const handleReset = () => {
+        setIsRunning(false);
+        setStarted(false);
+        setStepIndex(0);
+        setElapsed(0);
+        stopMusic();
+        toneStarted.current = false;
+      };
+
+      const handleTemplateChange = (key) => {
+        handleReset();
+        setTemplateKey(key);
+      };
+
+      const toggleMusic = async () => {
+        const next = !musicOn;
+        setMusicOn(next);
+        if (isRunning) {
+          if (next) { await startMusic(); }
+          else { stopMusic(); }
+        }
+      };
+
+      const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      const isFinished = stepIndex >= sequence.length;
+
+      const btnStyle = (color) => ({
+        padding: "12px 28px", borderRadius: 24, border: "none",
+        background: color, color: "#fff", fontWeight: 800, fontSize: 15,
+        cursor: "pointer", letterSpacing: 0.5, WebkitTapHighlightColor: "transparent"
+      });
+      const btnOutline = () => ({
+        padding: "12px 20px", borderRadius: 24, border: "2px solid #222",
+        background: "transparent", color: "#555", fontWeight: 700, fontSize: 13,
+        cursor: "pointer", WebkitTapHighlightColor: "transparent"
+      });
+
+      return (
+        <div style={{ minHeight: "100vh", background: "#0a0a14", color: "#f0f0f0", fontFamily: "'Segoe UI', system-ui, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 16px 40px" }}>
+
+          <div style={{ width: "100%", maxWidth: 480, marginBottom: 20 }}>
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 4, color: "#555", textTransform: "uppercase" }}>Circuit Renfo</span>
+              <h1 style={{ margin: "4px 0 0", fontSize: 22, fontWeight: 800, color: phaseColor, transition: "color 0.4s", letterSpacing: 1 }}>
+                {template.name}
+              </h1>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 8 }}>
+              {Object.keys(TEMPLATES).map(k => (
+                <button key={k} onClick={() => handleTemplateChange(k)} style={{
+                  padding: "8px 18px", borderRadius: 20, border: "2px solid",
+                  borderColor: templateKey === k ? TEMPLATES[k].color : "#222",
+                  background: templateKey === k ? TEMPLATES[k].color + "22" : "#111",
+                  color: templateKey === k ? TEMPLATES[k].color : "#555",
+                  fontWeight: 800, fontSize: 15, cursor: "pointer", transition: "all 0.2s", letterSpacing: 1,
+                  WebkitTapHighlightColor: "transparent"
+                }}>{k}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+            <CircleTimer progress={isFinished ? 1 : stepProgress} color={phaseColor} size={220} />
+            <div style={{ position: "absolute", textAlign: "center" }}>
+              {isFinished ? (
+                <div style={{ fontSize: 36 }}>🎉</div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11, letterSpacing: 3, color: "#555", textTransform: "uppercase", marginBottom: 2 }}>
+                    {step.type === "exercise" ? `Tour ${step.round} / ${ROUNDS}` :
+                     step.type === "transition" ? "SUIVANT" :
+                     step.type === "rest" ? "REPOS" :
+                     step.type === "warmup" ? "WARMUP" :
+                     step.type === "cooldown" ? "COOLDOWN" : ""}
+                  </div>
+                  <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1, color: phaseColor, transition: "color 0.4s" }}>
+                    {fmt(remaining)}
+                  </div>
+                  <div style={{ fontSize: 20, marginTop: 4 }}>{step.emoji}</div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div style={{ textAlign: "center", maxWidth: 420, marginBottom: 16, padding: "0 8px" }}>
+            {isFinished ? (
+              <div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "#2DC653" }}>Séance terminée 💪</div>
+                <div style={{ fontSize: 13, color: "#555", marginTop: 6 }}>Bien joué ! Pense à t'hydrater.</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: step.type === "round-announce" ? 20 : 24, fontWeight: 800, color: "#fff", lineHeight: 1.2, marginBottom: 6 }}>
+                  {step.label}
+                </div>
+                {step.tip && (
+                  <div style={{ fontSize: 13, color: "#777", lineHeight: 1.5, fontStyle: "italic" }}>{step.tip}</div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 12, marginBottom: 24, alignItems: "center" }}>
+            {!started ? (
+              <button onClick={handleStart} style={btnStyle("#FF5C00")}>▶ Démarrer</button>
+            ) : isFinished ? (
+              <button onClick={handleReset} style={btnStyle("#FF5C00")}>↺ Recommencer</button>
+            ) : isRunning ? (
+              <button onClick={handlePause} style={btnStyle("#F4B942")}>⏸ Pause</button>
+            ) : (
+              <button onClick={handleResume} style={btnStyle("#2DC653")}>▶ Reprendre</button>
+            )}
+            {started && !isFinished && (
+              <button onClick={handleReset} style={btnOutline()}>↺ Reset</button>
+            )}
+            <button onClick={toggleMusic} style={{
+              padding: "10px 14px", borderRadius: 20, border: "2px solid #222",
+              background: musicOn ? "#1a1a2e" : "#111", color: musicOn ? "#4CC9F0" : "#444",
+              fontWeight: 700, fontSize: 16, cursor: "pointer", WebkitTapHighlightColor: "transparent"
+            }}>{musicOn ? "🎵" : "🔇"}</button>
+          </div>
+
+          <div style={{ width: "100%", maxWidth: 420, marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#444", marginBottom: 6 }}>
+              <span>Progression globale</span>
+              <span>{fmt(totalElapsed)} / {fmt(total)}</span>
+            </div>
+            <div style={{ height: 4, background: "#1a1a2e", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${globalProgress * 100}%`, background: phaseColor, borderRadius: 4, transition: "width 0.5s, background 0.4s" }} />
+            </div>
+          </div>
+
+          <div style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 11, letterSpacing: 3, color: "#333", textTransform: "uppercase", marginBottom: 10 }}>Plan de séance</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {sequence.map((s, i) => {
+                const done = i < stepIndex;
+                const current = i === stepIndex;
+                const color = getPhaseColor(s.type);
+                return (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "7px 12px",
+                    borderRadius: 8, background: current ? color + "18" : "transparent",
+                    border: current ? `1px solid ${color}44` : "1px solid transparent",
+                    opacity: done ? 0.3 : 1, transition: "all 0.3s"
+                  }}>
+                    <span style={{ fontSize: 14, flexShrink: 0 }}>{done ? "✓" : s.emoji || "·"}</span>
+                    <span style={{ fontSize: 12, color: current ? color : "#555", fontWeight: current ? 700 : 400, flex: 1 }}>
+                      {s.type === "exercise" ? `T${s.round} · ${s.label}` : s.label}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#333", flexShrink: 0 }}>{fmt(s.duration)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
